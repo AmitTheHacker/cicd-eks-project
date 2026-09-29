@@ -9,7 +9,7 @@ env:
   AWS_REGION: us-east-1
   ECR_REPOSITORY: cicd-first
   EKS_CLUSTER: zidd-3
-  ECR_REGISTRY: 462096274890.dkr.ecr.us-east-1.amazonaws.com
+  ECR_REGISTRY: 716189571315.dkr.ecr.us-east-1.amazonaws.com
 
 jobs:
 

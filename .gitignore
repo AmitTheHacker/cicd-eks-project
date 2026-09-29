@@ -1,0 +1,25 @@
+# ==========================================
+# 🔐 Secrets & Local Reference Files (Our Test Files)
+# ==========================================
+gitleaks-test.txt
+temp-cicd
+
+
+# ==========================================
+# 📦 Node.js Dependencies & Environment
+# ==========================================
+node_modules/
+.env
+.env.local
+.env.*.local
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ==========================================
+# 💻 Local IDE Settings (VS Code / OS)
+# ==========================================
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
