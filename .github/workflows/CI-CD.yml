@@ -12,11 +12,11 @@ env:
   ECR_REGISTRY: 716189571315.dkr.ecr.us-east-1.amazonaws.com
   AWS_ROLE_ARN: arn:aws:iam::716189571315:role/GitHubActions-Enterprise-OIDC-Role
 
-# Required permissions for GitHub OIDC token exchange and repository read
 permissions:
   id-token: write
   contents: read
   actions: read 
+
 jobs:
 
   # ==========================================
@@ -27,24 +27,24 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # Step 1: Fetch source code repository
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      # Step 2: Set Short Commit SHA Output
       - name: Set Short Commit SHA
         id: vars
         run: echo "short_sha=${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
 
-      # Step 3: Scan repository for committed secrets
       - name: Run Gitleaks Secret Scan
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # Step 4: Authenticate with AWS using OIDC Identity Provider
+      #Debug Step
+      - name: Debug OIDC
+        uses: github/actions-oidc-debugger@main
+
       - name: Configure AWS Credentials via OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -52,17 +52,15 @@ jobs:
           role-session-name: GitHubActions-CI-${{ github.run_id }}
           aws-region: ${{ env.AWS_REGION }}
 
-      # Step 5: Authenticate Docker CLI to Amazon ECR
       - name: Login to Amazon ECR
         uses: aws-actions/amazon-ecr-login@v2
 
-      # Step 6: Build Docker Container Image tagged with Git Commit SHA
       - name: Build Docker Image
         run: |
           IMAGE=$ECR_REGISTRY/$ECR_REPOSITORY:${{ steps.vars.outputs.short_sha }}
           docker build -t $IMAGE .
 
-      # Step 7: Scan Docker Image for Critical and High Vulnerabilities
+      # TASK 2: Trivy Strict Mode (exit-code: 1)
       - name: Run Trivy Vulnerability Scanner
         uses: aquasecurity/trivy-action@v0.36.0
         with:
@@ -73,7 +71,6 @@ jobs:
           vuln-type: 'os,library'
           severity: 'CRITICAL,HIGH'
 
-      # Step 8: Push Verified Docker Image to Amazon ECR
       - name: Push Docker Image to ECR
         run: |
           IMAGE=$ECR_REGISTRY/$ECR_REPOSITORY:${{ steps.vars.outputs.short_sha }}
@@ -89,16 +86,13 @@ jobs:
     environment: production
 
     steps:
-      # Step 1: Fetch repository manifests
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # Step 2: Set Short Commit SHA Output
       - name: Set Short Commit SHA
         id: vars
         run: echo "short_sha=${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
 
-      # Step 3: Authenticate with AWS via OIDC for deployment
       - name: Configure AWS Credentials via OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -106,20 +100,23 @@ jobs:
           role-session-name: GitHubActions-CD-${{ github.run_id }}
           aws-region: ${{ env.AWS_REGION }}
 
-      # Step 4: Update local kubeconfig to connect to Amazon EKS
       - name: Configure kubectl for Amazon EKS
         run: |
           aws eks update-kubeconfig \
             --region $AWS_REGION \
             --name $EKS_CLUSTER
 
-      # Step 5: Deploy Kubernetes Manifests / Update Container Image
       - name: Update Deployment Image on EKS
         run: |
           IMAGE=$ECR_REGISTRY/$ECR_REPOSITORY:${{ steps.vars.outputs.short_sha }}
-          kubectl set image deployment/cicd-first cicd-first=$IMAGE --record || kubectl apply -f k8s/deployment.yml
+          kubectl set image deployment/cicd-first cicd-first=$IMAGE || kubectl apply -f k8s/deployment.yml
 
-      # Step 6: Monitor and verify rolling deployment status
-      - name: Verify Kubernetes Deployment Rollout Status
+      # TASK 3: Automated Rollback on Failure
+      - name: Verify Kubernetes Deployment Rollout & Rollback
         run: |
-          kubectl rollout status deployment/cicd-first --timeout=5m
+          if ! kubectl rollout status deployment/cicd-first --timeout=2m; then
+            echo "❌ Deployment Failed! Rolling back..."
+            kubectl rollout undo deployment/cicd-first
+            exit 1
+          fi
+          echo "✅ Deployment Successful!"
