@@ -106,7 +106,7 @@ jobs:
       - name: 🔄 Deploy / Update Image on EKS
         run: |
           IMAGE=$ECR_REGISTRY/$ECR_REPOSITORY:${{ steps.vars.outputs.short_sha }}
-          kubectl apply -f k8s/deployment.yaml
+          kubectl apply -f k8s/deployment.yml
           kubectl set image deployment/cicd-first cicd-first=$IMAGE
 
       # 🟢 TASK 3: Automated Rollback on Failure
