@@ -1,9 +1,8 @@
-name: Production CI/CD Pipeline (Helm Enabled)
+name: Multi-Env CI/CD (Staging + Production)
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
 
 env:
   AWS_REGION: us-east-1
@@ -19,110 +18,135 @@ permissions:
 
 jobs:
   # ==========================================
-  # CI Stage: Build, Scan & Push
+  # 1. CI: Build + Scan + Push
   # ==========================================
   ci:
-    name: 🏗️ Continuous Integration
+    name: 🏗️ CI - Build & Push
     runs-on: ubuntu-latest
+    outputs:
+      short_sha: ${{ steps.vars.outputs.short_sha }}
 
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Set Short Commit SHA
+      - name: Set Short SHA
         id: vars
         run: echo "short_sha=${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
 
-      - name: 🕵️ Run Gitleaks Secret Scan
+      - name: Gitleaks Scan
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: 🔐 Configure AWS Credentials via OIDC
+      - name: Configure AWS (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ env.AWS_ROLE_ARN }}
           role-session-name: GitHubActions-CI-${{ github.run_id }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: 🐳 Login to Amazon ECR
+      - name: Login to ECR
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: 🔨 Build Docker Image
+      - name: Build & Tag
         run: |
           IMAGE=$ECR_REGISTRY/$ECR_REPOSITORY:${{ steps.vars.outputs.short_sha }}
           docker build -t $IMAGE .
           docker tag $IMAGE $ECR_REGISTRY/$ECR_REPOSITORY:latest
 
-      - name: 🛡️ Run Trivy Vulnerability Scanner
+      - name: Trivy Scan
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: "${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ steps.vars.outputs.short_sha }}"
           format: "table"
           exit-code: "1"
           ignore-unfixed: true
-          vuln-type: "os,library"
           severity: "CRITICAL"
 
-      - name: 📤 Push Docker Image to ECR
+      - name: Push to ECR
         run: |
           IMAGE=$ECR_REGISTRY/$ECR_REPOSITORY:${{ steps.vars.outputs.short_sha }}
           docker push $IMAGE
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
 
   # ==========================================
-  # CD Stage: Helm Deploy to EKS
+  # 2. Deploy to STAGING (Auto)
   # ==========================================
-  cd:
-    name: 🚀 Continuous Deployment (Helm)
+  deploy-staging:
+    name: 🚀 Deploy to STAGING
     runs-on: ubuntu-latest
     needs: ci
-    environment: production
+    environment: staging
 
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set Short Commit SHA
-        id: vars
-        run: echo "short_sha=${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
-
-      - name: 🔐 Configure AWS Credentials via OIDC
+      - name: Configure AWS (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ env.AWS_ROLE_ARN }}
-          role-session-name: GitHubActions-CD-${{ github.run_id }}
+          role-session-name: GitHubActions-Staging-${{ github.run_id }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: ☸️ Configure kubectl for Amazon EKS
-        run: |
-          aws eks update-kubeconfig --region $AWS_REGION --name $EKS_CLUSTER
+      - name: Setup kubeconfig
+        run: aws eks update-kubeconfig --region $AWS_REGION --name $EKS_CLUSTER
 
-      # 🟢 TASK 2: Helm Upgrade/Install
-      - name: 🎯 Deploy / Upgrade via Helm Chart
+      - name: Helm Deploy STAGING
         run: |
-          echo "☸️ Deploying with Helm..."
-          helm upgrade --install cicd-first ./helm/cicd-first \
-            --set image.repository=$ECR_REGISTRY/$ECR_REPOSITORY \
-            --set image.tag=${{ steps.vars.outputs.short_sha }} \
-            --namespace default \
+          helm upgrade --install cicd-first-staging ./helm/cicd-first \
+            -f ./helm/cicd-first/values-staging.yaml \
+            --set image.tag=${{ needs.ci.outputs.short_sha }} \
+            --namespace staging \
+            --create-namespace \
             --wait \
-            --timeout 3m0s
+            --timeout 3m
 
-      # 🟢 TASK 3: Helm Rollback on Failure
-      - name: 🚦 Verify Deployment & Helm Rollback
-        if: failure()
+      - name: Staging Summary
         run: |
-          echo "❌ Helm Deployment Failed! Rolling back to previous Helm revision..."
-          helm rollback cicd-first 0 --namespace default
+          echo "### 🟢 STAGING Deployed" >> $GITHUB_STEP_SUMMARY
+          echo "- Namespace: \`staging\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Image Tag: \`${{ needs.ci.outputs.short_sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Release: \`cicd-first-staging\`" >> $GITHUB_STEP_SUMMARY
 
-      - name: 📊 Generate Deployment Summary
+  # ==========================================
+  # 3. Deploy to PRODUCTION (Manual Approval)
+  # ==========================================
+  deploy-production:
+    name: 🚀 Deploy to PRODUCTION
+    runs-on: ubuntu-latest
+    needs: [ci, deploy-staging]
+    environment: production # ← Approval Gate yahan hai
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          role-session-name: GitHubActions-Prod-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup kubeconfig
+        run: aws eks update-kubeconfig --region $AWS_REGION --name $EKS_CLUSTER
+
+      - name: Helm Deploy PRODUCTION
+        run: |
+          helm upgrade --install cicd-first-prod ./helm/cicd-first \
+            -f ./helm/cicd-first/values-prod.yaml \
+            --set image.tag=${{ needs.ci.outputs.short_sha }} \
+            --namespace production \
+            --create-namespace \
+            --wait \
+            --timeout 3m
+
+      - name: Production Summary
         if: always()
         run: |
-          echo "### 🚀 Helm Deployment Summary" >> $GITHUB_STEP_SUMMARY
-          echo "* **Cluster Name:** \`${{ env.EKS_CLUSTER }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "* **Helm Release:** \`cicd-first\`" >> $GITHUB_STEP_SUMMARY
-          echo "* **Deployed Tag:** \`${{ steps.vars.outputs.short_sha }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "* **Deployment Status:** ${{ job.status == 'success' && '🟢 SUCCESS' || '🔴 FAILED' }}" >> $GITHUB_STEP_SUMMARY
+          echo "### 🟢 PRODUCTION Deployed" >> $GITHUB_STEP_SUMMARY
+          echo "- Namespace: \`production\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Image Tag: \`${{ needs.ci.outputs.short_sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Release: \`cicd-first-prod\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Status: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
