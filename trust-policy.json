@@ -12,10 +12,7 @@
           "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
         },
         "StringLike": {
-          "token.actions.githubusercontent.com:sub": [
-            "repo:AmitTheHacker/cicd-eks-project:*",
-            "repo:amitthehacker/cicd-eks-project:*"
-          ]
+          "token.actions.githubusercontent.com:sub": "repo:AmitTheHacker@55714630/cicd-eks-project@1395182448:*"
         }
       }
     }

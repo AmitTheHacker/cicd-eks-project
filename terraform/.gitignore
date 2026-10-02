@@ -1,0 +1,14 @@
+# Terraform ke sensitive files - kabhi Git me mat daal!
+
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfvars
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+.terraform.lock.hcl
