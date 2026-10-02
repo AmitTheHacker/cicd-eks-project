@@ -15,11 +15,11 @@ app.get("/api/dashboard", (req, res) => {
     res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
 
     res.json({
-        application: "DevOps Dashboard",
-        version: "1.0.0",
-        environment: "Local Machine",
+        application: "EKS Microservice",
+        version: "2.0.0 (Helm)",
+        environment: "AWS EKS (us-east-1)",
         status: "Running",
-        docker: "containerized",
+        docker: "Helm Managed",
         requests: requestCount,
         time: new Date().toLocaleString(),
         services: [
@@ -28,12 +28,12 @@ app.get("/api/dashboard", (req, res) => {
                 status: "Healthy"
             },
             {
-                name: "API",
+                name: "API Gateway",
                 status: "Healthy"
             },
             {
-                name: "Database",
-                status: "Disconnected"
+                name: "EKS Helm Release",
+                status: "Healthy"
             }
         ]
     });
@@ -43,7 +43,7 @@ app.get("/api/dashboard", (req, res) => {
 app.get("/api/health", (req, res) => {
     res.json({
         status: "UP",
-        message: "Application is healthy",
+        message: "Application is healthy and running on EKS via Helm",
         timestamp: new Date().toLocaleString()
     });
 });

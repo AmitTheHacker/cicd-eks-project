@@ -1,4 +1,4 @@
-name: Production CI/CD Pipeline
+name: Production CI/CD Pipeline (Helm Enabled)
 
 on:
   push:
@@ -35,7 +35,6 @@ jobs:
         id: vars
         run: echo "short_sha=${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
 
-      # 🟢 TASK 1: Secret Scanning
       - name: 🕵️ Run Gitleaks Secret Scan
         uses: gitleaks/gitleaks-action@v2
         env:
@@ -57,7 +56,6 @@ jobs:
           docker build -t $IMAGE .
           docker tag $IMAGE $ECR_REGISTRY/$ECR_REPOSITORY:latest
 
-      # 🟢 TASK 2: Trivy Strict Mode (Fail on CRITICAL vulnerabilities)
       - name: 🛡️ Run Trivy Vulnerability Scanner
         uses: aquasecurity/trivy-action@v0.36.0
         with:
@@ -75,13 +73,13 @@ jobs:
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
 
   # ==========================================
-  # CD Stage: Deploy to EKS & Rollback
+  # CD Stage: Helm Deploy to EKS
   # ==========================================
   cd:
-    name: 🚀 Continuous Deployment
+    name: 🚀 Continuous Deployment (Helm)
     runs-on: ubuntu-latest
     needs: ci
-    environment: production # 👈 TASK 4: Manual Approval Gate Environment
+    environment: production
 
     steps:
       - name: Checkout Code
@@ -102,28 +100,29 @@ jobs:
         run: |
           aws eks update-kubeconfig --region $AWS_REGION --name $EKS_CLUSTER
 
-      - name: 🔄 Deploy / Update Image on EKS
+      # 🟢 TASK 2: Helm Upgrade/Install
+      - name: 🎯 Deploy / Upgrade via Helm Chart
         run: |
-          IMAGE=$ECR_REGISTRY/$ECR_REPOSITORY:${{ steps.vars.outputs.short_sha }}
-          kubectl apply -f k8s/deployment.yml
-          kubectl set image deployment/cicd-first cicd-first=$IMAGE
+          echo "☸️ Deploying with Helm..."
+          helm upgrade --install cicd-first ./helm/cicd-first \
+            --set image.repository=$ECR_REGISTRY/$ECR_REPOSITORY \
+            --set image.tag=${{ steps.vars.outputs.short_sha }} \
+            --namespace default \
+            --wait \
+            --timeout 3m0s
 
-      # 🟢 TASK 3: Automated Rollback on Failure
-      - name: 🚦 Verify Rollout & Automated Rollback
+      # 🟢 TASK 3: Helm Rollback on Failure
+      - name: 🚦 Verify Deployment & Helm Rollback
+        if: failure()
         run: |
-          if ! kubectl rollout status deployment/cicd-first --timeout=2m; then
-            echo "❌ Deployment Failed! Rolling back to previous working version..."
-            kubectl rollout undo deployment/cicd-first
-            exit 1
-          fi
-          echo "✅ Deployment Successful!"
+          echo "❌ Helm Deployment Failed! Rolling back to previous Helm revision..."
+          helm rollback cicd-first 0 --namespace default
 
-      # 🟢 TASK 5: Deployment Summary Report
       - name: 📊 Generate Deployment Summary
         if: always()
         run: |
-          echo "### 🚀 Production Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "### 🚀 Helm Deployment Summary" >> $GITHUB_STEP_SUMMARY
           echo "* **Cluster Name:** \`${{ env.EKS_CLUSTER }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "* **AWS Region:** \`${{ env.AWS_REGION }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "* **Deployed Commit SHA:** \`${{ steps.vars.outputs.short_sha }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "* **Deployment Result:** ${{ job.status == 'success' && '🟢 SUCCESS' || '🔴 FAILED' }}" >> $GITHUB_STEP_SUMMARY
+          echo "* **Helm Release:** \`cicd-first\`" >> $GITHUB_STEP_SUMMARY
+          echo "* **Deployed Tag:** \`${{ steps.vars.outputs.short_sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "* **Deployment Status:** ${{ job.status == 'success' && '🟢 SUCCESS' || '🔴 FAILED' }}" >> $GITHUB_STEP_SUMMARY
