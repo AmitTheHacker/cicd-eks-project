@@ -1,0 +1,20 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cicd-first-prod
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/AmitTheHacker/cicd-eks-project # my GitHub URL
+    targetRevision: HEAD
+    path: helm/cicd-first
+    helm:
+      valueFiles:
+        - values-prod.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: production
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true

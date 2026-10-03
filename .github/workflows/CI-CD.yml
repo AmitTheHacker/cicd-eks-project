@@ -1,4 +1,4 @@
-name: Multi-Env CI/CD (Staging + Production)
+name: Multi-Env GitOps CI/CD (Cosign + ArgoCD)
 
 on:
   push:
@@ -7,21 +7,19 @@ on:
 env:
   AWS_REGION: us-east-1
   ECR_REPOSITORY: cicd-first-tf
-  EKS_CLUSTER: zidd-tf-cluster
-  ECR_REGISTRY: 716189571315.dkr.ecr.us-east-1.amazonaws.com
+  ECR_REGISTRY: ://amazonaws.com
   AWS_ROLE_ARN: arn:aws:iam::716189571315:role/GitHubActions-Terraform-Role
 
 permissions:
   id-token: write
-  contents: read
-  actions: read
+  contents: write # ← Modified to allow GitHub Actions to commit tag changes
 
 jobs:
   # ==========================================
-  # 1. CI: Build + Scan + Push
+  # 1. CI: Build, Scan, Sign with Cosign & Push
   # ==========================================
   ci:
-    name: 🏗️ CI - Build & Push
+    name: 🏗️ CI - Build, Sign & Push
     runs-on: ubuntu-latest
     outputs:
       short_sha: ${{ steps.vars.outputs.short_sha }}
@@ -71,11 +69,23 @@ jobs:
           docker push $IMAGE
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
 
+      # 🛡️ COSIGN INTEGRATION: Install Cosign CLI
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3.5.0
+
+      # 🛡️ COSIGN INTEGRATION: Digitally Sign the Docker Image
+      - name: Sign Docker Image
+        env:
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+        run: |
+          cosign sign --yes --key env://COSIGN_PRIVATE_KEY ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ steps.vars.outputs.short_sha }}
+
   # ==========================================
-  # 2. Deploy to STAGING (Auto)
+  # 2. CD: GitOps Tag Update for Staging (Auto)
   # ==========================================
   deploy-staging:
-    name: 🚀 Deploy to STAGING
+    name: 🚀 GitOps Update - STAGING
     runs-on: ubuntu-latest
     needs: ci
     environment: staging
@@ -83,70 +93,48 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Configure AWS (OIDC)
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ env.AWS_ROLE_ARN }}
-          role-session-name: GitHubActions-Staging-${{ github.run_id }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Setup kubeconfig
-        run: aws eks update-kubeconfig --region $AWS_REGION --name $EKS_CLUSTER
-
-      - name: Helm Deploy STAGING
+      # Automatically updates the image tag inside values-staging.yaml
+      - name: Update Staging Image Tag
         run: |
-          helm upgrade --install cicd-first-staging ./helm/cicd-first \
-            -f ./helm/cicd-first/values-staging.yaml \
-            --set image.tag=${{ needs.ci.outputs.short_sha }} \
-            --namespace staging \
-            --create-namespace \
-            --wait \
-            --timeout 3m
+          sed -i 's/tag: .*/tag: "${{ needs.ci.outputs.short_sha }}"/g' ./helm/cicd-first/values-staging.yaml
 
-      - name: Staging Summary
+      # Commits the changes back to GitHub so ArgoCD can pull it
+      - name: Commit & Push Changes to Git
         run: |
-          echo "### 🟢 STAGING Deployed" >> $GITHUB_STEP_SUMMARY
-          echo "- Namespace: \`staging\`" >> $GITHUB_STEP_SUMMARY
-          echo "- Image Tag: \`${{ needs.ci.outputs.short_sha }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- Release: \`cicd-first-staging\`" >> $GITHUB_STEP_SUMMARY
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@://github.com"
+          git add ./helm/cicd-first/values-staging.yaml
+          git commit -m "gitops(staging): update image tag to ${{ needs.ci.outputs.short_sha }} [skip ci]"
+          git push
 
   # ==========================================
-  # 3. Deploy to PRODUCTION (Manual Approval)
+  # 3. CD: GitOps Tag Update for Production (Manual Approval)
   # ==========================================
   deploy-production:
-    name: 🚀 Deploy to PRODUCTION
+    name: 🚀 GitOps Update - PRODUCTION
     runs-on: ubuntu-latest
     needs: [ci, deploy-staging]
-    environment: production # ← Approval Gate yahan hai
+    environment: production # ← Manual Approval Gate remains here
 
     steps:
       - uses: actions/checkout@v4
-
-      - name: Configure AWS (OIDC)
-        uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ env.AWS_ROLE_ARN }}
-          role-session-name: GitHubActions-Prod-${{ github.run_id }}
-          aws-region: ${{ env.AWS_REGION }}
+          token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Setup kubeconfig
-        run: aws eks update-kubeconfig --region $AWS_REGION --name $EKS_CLUSTER
+      # Fetch the latest changes pushed by the staging job
+      - name: Pull Latest Git Changes
+        run: git pull origin main
 
-      - name: Helm Deploy PRODUCTION
+      # Automatically updates the image tag inside values-prod.yaml
+      - name: Update Production Image Tag
         run: |
-          helm upgrade --install cicd-first-prod ./helm/cicd-first \
-            -f ./helm/cicd-first/values-prod.yaml \
-            --set image.tag=${{ needs.ci.outputs.short_sha }} \
-            --namespace production \
-            --create-namespace \
-            --wait \
-            --timeout 3m
+          sed -i 's/tag: .*/tag: "${{ needs.ci.outputs.short_sha }}"/g' ./helm/cicd-first/values-prod.yaml
 
-      - name: Production Summary
-        if: always()
+      # Commits the production changes back to GitHub
+      - name: Commit & Push Changes to Git
         run: |
-          echo "### 🟢 PRODUCTION Deployed" >> $GITHUB_STEP_SUMMARY
-          echo "- Namespace: \`production\`" >> $GITHUB_STEP_SUMMARY
-          echo "- Image Tag: \`${{ needs.ci.outputs.short_sha }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- Release: \`cicd-first-prod\`" >> $GITHUB_STEP_SUMMARY
-          echo "- Status: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@://github.com"
+          git add ./helm/cicd-first/values-prod.yaml
+          git commit -m "gitops(production): update image tag to ${{ needs.ci.outputs.short_sha }} [skip ci]"
+          git push

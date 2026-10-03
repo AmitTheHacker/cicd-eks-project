@@ -16,6 +16,13 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
+
+# Ignore Terraform State in Root Folder
+*.tfstate
+*.tfstate.backup
+.terraform/
+
+
 # ==========================================
 # 💻 Local IDE Settings (VS Code / OS)
 # ==========================================
@@ -23,3 +30,9 @@ yarn-error.log*
 .idea/
 .DS_Store
 Thumbs.db
+
+# ==========================================
+# 🛡️ Cryptographic Keys (Do Not Push)
+# ==========================================
+cosign.key
+
