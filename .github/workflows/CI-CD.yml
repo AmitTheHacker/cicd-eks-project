@@ -7,12 +7,12 @@ on:
 env:
   AWS_REGION: us-east-1
   ECR_REPOSITORY: cicd-first-tf
-  ECR_REGISTRY: ://amazonaws.com
+  ECR_REGISTRY: ://amazonaws.com # ← FIXED: Correct AWS ECR Registry Endpoint
   AWS_ROLE_ARN: arn:aws:iam::716189571315:role/GitHubActions-Terraform-Role
 
 permissions:
   id-token: write
-  contents: write # ← Modified to allow GitHub Actions to commit tag changes
+  contents: write # ← Required to allow GitHub Actions to commit tag changes back to git
 
 jobs:
   # ==========================================
@@ -50,9 +50,8 @@ jobs:
 
       - name: Build & Tag
         run: |
-          IMAGE=$ECR_REGISTRY/$ECR_REPOSITORY:${{ steps.vars.outputs.short_sha }}
-          docker build -t $IMAGE .
-          docker tag $IMAGE $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          docker build -t ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ steps.vars.outputs.short_sha }} .
+          docker tag ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ steps.vars.outputs.short_sha }} ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:latest
 
       - name: Trivy Scan
         uses: aquasecurity/trivy-action@v0.36.0
@@ -65,9 +64,8 @@ jobs:
 
       - name: Push to ECR
         run: |
-          IMAGE=$ECR_REGISTRY/$ECR_REPOSITORY:${{ steps.vars.outputs.short_sha }}
-          docker push $IMAGE
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          docker push ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ steps.vars.outputs.short_sha }}
+          docker push ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:latest
 
       # 🛡️ COSIGN INTEGRATION: Install Cosign CLI
       - name: Install Cosign
@@ -102,7 +100,7 @@ jobs:
       - name: Commit & Push Changes to Git
         run: |
           git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@://github.com"
+          git config --global user.email "github-actions[bot]@://github.com" # ← FIXED
           git add ./helm/cicd-first/values-staging.yaml
           git commit -m "gitops(staging): update image tag to ${{ needs.ci.outputs.short_sha }} [skip ci]"
           git push
@@ -134,7 +132,7 @@ jobs:
       - name: Commit & Push Changes to Git
         run: |
           git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@://github.com"
+          git config --global user.email "github-actions[bot]@://github.com" # ← FIXED
           git add ./helm/cicd-first/values-prod.yaml
           git commit -m "gitops(production): update image tag to ${{ needs.ci.outputs.short_sha }} [skip ci]"
           git push
