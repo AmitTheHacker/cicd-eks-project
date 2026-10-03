@@ -7,7 +7,7 @@ on:
 env:
   AWS_REGION: us-east-1
   ECR_REPOSITORY: cicd-first-tf
-  ECR_REGISTRY: ://amazonaws.com # ← FIXED: Correct AWS ECR Registry Endpoint
+  ECR_REGISTRY: 716189571315.dkr.ecr.us-east-1.amazonaws.com
   AWS_ROLE_ARN: arn:aws:iam::716189571315:role/GitHubActions-Terraform-Role
 
 permissions:
