@@ -79,6 +79,31 @@ jobs:
         run: |
           cosign sign --yes --key env://COSIGN_PRIVATE_KEY ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ steps.vars.outputs.short_sha }}
 
+      # 📨 STAGE 1 EMAIL: CI Status Notification
+      - name: Send CI Stage Email
+        if: always()
+        uses: dawidd6/action-send-mail@v4
+        with:
+          server_address: ://gmail.com
+          server_port: 465
+          secure: true
+          username: ${{ secrets.MAIL_USERNAME }}
+          password: ${{ secrets.MAIL_PASSWORD }}
+          subject: "CI STAGE ALERT: ${{ github.repository }} [${{ job.status }}]"
+          to: ${{ secrets.MAIL_USERNAME }}
+          from: "GitHub Actions Bot <${{ secrets.MAIL_USERNAME }}>"
+          body: |
+            Hello,
+
+            The CI Stage (Build, Scan & Sign) has completed.
+
+            - Repository: ${{ github.repository }}
+            - Branch: ${{ github.ref_name }}
+            - Commit: ${{ steps.vars.outputs.short_sha }}
+            - CI Stage Status: ${{ job.status }}
+
+            Check details in GitHub Actions tab.
+
   # ==========================================
   # 2. CD: GitOps Tag Update for Staging (Auto)
   # ==========================================
@@ -100,10 +125,32 @@ jobs:
       - name: Commit & Push Changes to Git
         run: |
           git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@://github.com" # ← FIXED
+          git config --global user.email "github-actions[bot]@://github.com"
           git add ./helm/cicd-first/values-staging.yaml
           git commit -m "gitops(staging): update image tag to ${{ needs.ci.outputs.short_sha }} [skip ci]"
           git push
+
+      # 📨 STAGE 2 EMAIL: Staging Deployment Status Notification
+      - name: Send Staging Deployment Email
+        if: always()
+        uses: dawidd6/action-send-mail@v4
+        with:
+          server_address: ://gmail.com
+          server_port: 465
+          secure: true
+          username: ${{ secrets.MAIL_USERNAME }}
+          password: ${{ secrets.MAIL_PASSWORD }}
+          subject: "STAGING DEPLOY ALERT: ${{ github.repository }} [${{ job.status }}]"
+          to: ${{ secrets.MAIL_USERNAME }}
+          from: "GitHub Actions Bot <${{ secrets.MAIL_USERNAME }}>"
+          body: |
+            Hello,
+
+            The GitOps Update for STAGING environment has completed.
+
+            - Repository: ${{ github.repository }}
+            - Deployed Tag: ${{ needs.ci.outputs.short_sha }}
+            - Staging Deployment Status: ${{ job.status }}
 
   # ==========================================
   # 3. CD: GitOps Tag Update for Production (Manual Approval)
@@ -132,7 +179,29 @@ jobs:
       - name: Commit & Push Changes to Git
         run: |
           git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@://github.com" # ← FIXED
+          git config --global user.email "github-actions[bot]@://github.com"
           git add ./helm/cicd-first/values-prod.yaml
           git commit -m "gitops(production): update image tag to ${{ needs.ci.outputs.short_sha }} [skip ci]"
           git push
+
+      # 📨 STAGE 3 EMAIL: Production Deployment Status Notification
+      - name: Send Production Deployment Email
+        if: always()
+        uses: dawidd6/action-send-mail@v4
+        with:
+          server_address: ://gmail.com
+          server_port: 465
+          secure: true
+          username: ${{ secrets.MAIL_USERNAME }}
+          password: ${{ secrets.MAIL_PASSWORD }}
+          subject: "PRODUCTION DEPLOY ALERT: ${{ github.repository }} [${{ job.status }}]"
+          to: ${{ secrets.MAIL_USERNAME }}
+          from: "GitHub Actions Bot <${{ secrets.MAIL_USERNAME }}>"
+          body: |
+            Hello,
+
+            The GitOps Update for PRODUCTION environment has completed.
+
+            - Repository: ${{ github.repository }}
+            - Deployed Tag: ${{ needs.ci.outputs.short_sha }}
+            - Production Deployment Status: ${{ job.status }}
