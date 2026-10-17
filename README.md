@@ -6,25 +6,35 @@ This repository showcases a cutting-edge, enterprise-grade **Multi-Environment D
 
 ## 🏗️ Architectural Topology & Component Governance
 
-```text
-       [ Developer Push ] ────► [ GitHub Repository ]
-                                       │
-                                       ▼ (Secure OIDC Trust)
-                              [ GitHub Actions Runner ]
-                                 │                 │
-     (Gitleaks Secret Gate) ◄────┤                 ├────► (Trivy Container Scan)
-                                 │                 │
-                                 ▼                 ▼
-                         [ Sign with Cosign ]   [ Push Verified Layer to ECR ]
-                                                   │
-                                                   ▼
-                                           [ ArgoCD Engine ]
-                                        (Reconcile Git State)
-                                         /               \
-                                        ▼                 ▼
-                             [ Namespace: staging ]   [ Namespace: production ]
-                             (Dynamic Values Chart)   (Manual Approval Gate)
+```mermaid
+graph TD
+    %% Styling definitions
+    classDef dev fill:#24292e,stroke:#fff,stroke-width:2px,color:#fff;
+    classDef sec fill:#ff4444,stroke:#fff,stroke-width:2px,color:#fff;
+    classDef aws fill:#FF9900,stroke:#fff,stroke-width:2px,color:#000;
+    classDef k8s fill:#326CE5,stroke:#fff,stroke-width:2px,color:#fff;
+
+    %% Nodes Definition
+    A[👨‍💻 Developer Commit & Push]:::dev --> B[🐙 GitHub Repository]:::dev
+    B --> C[⚙️ GitHub Actions Runner]:::dev
+    
+    %% Security & CI Gates
+    C --> D[🔍 Gitleaks Secret Scan]:::sec
+    C --> E[🛡️ Trivy Container Security Scan]:::sec
+    E --> F[🔏 Sigstore Cosign Image Signing]:::sec
+    
+    %% Infrastructure & CD Pull Loop
+    F --> G[📦 Amazon ECR Registered Registry]:::aws
+    G --> H[☸️ ArgoCD GitOps Sync Control Loop]:::k8s
+    
+    %% Target isolated Namespaces
+    H --> I[🧪 Namespace: staging <br> 1 Replica - Auto Sync]:::k8s
+    H --> J[👑 Namespace: production <br> 2 Replicas - Gated Approval Switch]:::k8s
+
+    %% Apply configuration layout styles
+    style C fill:#24292e,color:#fff
 ```
+
 
 1. **Infrastructure as Code (IaC):** Virtual Private Clouds (VPC), subnet mappings, elastic container registries (`cicd-first-tf`), clusters (`zidd-tf-cluster`), and structural policies are provisioned via declarative **Terraform** graphs.
 2. **Passwordless Federation Architecture:** Long-lived credential structures are deprecated. Runner environments exchange ephemeral JWT constraints with **AWS IAM OIDC Identity Providers** to securely interact with control planes.
